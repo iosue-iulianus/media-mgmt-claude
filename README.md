@@ -46,6 +46,32 @@ Requires [uv](https://docs.astral.sh/uv/) and Sonarr v4 / Radarr with API v3.
 `.env` is read on every call, so config changes need no restart. Changes to
 `server.py` do.
 
+## Telegram bot (Docker)
+
+`bot/bot.py` is a Telegram front end that hands each message to the Claude
+Code CLI (`claude -p`) with only the media-mgmt tools available. Built-in
+tools (shell, files, web) and slash commands are disabled, and only the
+Telegram user IDs in `TELEGRAM_ALLOWED_USER_IDS` are answered. Each chat keeps
+one Claude session for follow-ups; `/new` starts a fresh one.
+
+It uses your Claude subscription through a long-lived token, so requests count
+against your plan's usage limits. Keep it to your own use: subscription
+credentials can't be used on other people's behalf.
+
+1. Create a bot with @BotFather and note its token.
+2. On any machine signed in to Claude Code, run `claude setup-token` and copy
+   the token it prints (valid for one year).
+3. On the Docker host, next to `docker-compose.yml`:
+   - `cp bot.env.example bot.env` and fill it in
+   - put the same `.env` the MCP server uses alongside it
+4. `docker compose up -d --build`, then `docker compose logs -f`.
+
+The container must be able to resolve and reach the Sonarr and Radarr URLs in
+`.env`. If `.lan` names don't resolve inside Docker, use IP addresses there.
+
+Claude Code is installed from Anthropic's apt repository and does not
+auto-update; rebuild the image (`docker compose build --pull`) to upgrade.
+
 ## Notes
 
 - Pinned to `mcp>=1.28,<2` (the v1 SDK line).

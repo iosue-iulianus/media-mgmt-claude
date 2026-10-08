@@ -1,0 +1,6 @@
+.git
+.env
+.env.*
+bot.env
+__pycache__
+.DS_Store

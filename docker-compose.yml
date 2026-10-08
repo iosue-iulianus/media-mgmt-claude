@@ -1,0 +1,13 @@
+services:
+  media-bot:
+    build: .
+    container_name: media-mgmt-bot
+    restart: unless-stopped
+    env_file: bot.env
+    volumes:
+      # Same .env the Mac uses: Sonarr/Radarr URLs, API keys, folders, profiles.
+      - ./.env:/app/.env:ro
+      - claude-state:/data
+
+volumes:
+  claude-state:
