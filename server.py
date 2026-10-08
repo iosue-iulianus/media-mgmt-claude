@@ -7,8 +7,8 @@
 Runs as a stdio child process of the Claude desktop app. It reads connection
 details from the .env file next to this script, so API keys never leave this
 machine. It can search, add, switch on monitoring for a movie or for more
-seasons of a show, report the download queue, and replace a dead download
-(cancel it, blocklist the release, search again). It cannot delete library
+seasons of a show, report the download queue and the release calendars, and
+replace a dead download (cancel it, blocklist the release, search again). It cannot delete library
 items or files, unmonitor, change settings, or reach any host other than the
 two configured in .env.
 
@@ -19,6 +19,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -28,6 +29,7 @@ ENV_FILE = Path(__file__).resolve().parent / ".env"
 TIMEOUT_SECONDS = 20
 MAX_SEARCH_RESULTS = 8
 QUEUE_PAGE_SIZE = 1000
+MAX_UPCOMING_EPISODES = 5
 
 mcp = FastMCP("media-mgmt")
 
@@ -135,6 +137,7 @@ def search_movie(title: str) -> list[dict]:
             "genres": movie.get("genres"),
             "original_language": (movie.get("originalLanguage") or {}).get("name"),
             "in_library": bool(movie.get("id")),
+            **release_dates(movie),
             "overview": (movie.get("overview") or "")[:200],
         }
         for movie in results[:MAX_SEARCH_RESULTS]
@@ -294,6 +297,74 @@ def monitor_seasons(tvdb_id: int, seasons: list[int]) -> str:
 
 
 @mcp.tool()
+def show_schedule(tvdb_id: int) -> dict:
+    """Air dates Sonarr knows for a series in the library: last aired, next airing, upcoming episodes.
+
+    next_airing is empty when no future episode has a date yet, for example a
+    renewed season that is announced but not scheduled. Times are local.
+    """
+    matches = api("SONARR", "GET", "series", params={"tvdbId": tvdb_id})
+    if not matches:
+        raise ArrError(f"No series with TVDB id {tvdb_id} is in Sonarr.")
+    series = matches[0]
+    episodes = api("SONARR", "GET", "episode", params={"seriesId": series["id"]})
+    now = datetime.now(timezone.utc)
+    upcoming = sorted(
+        (
+            episode
+            for episode in episodes
+            if episode.get("airDateUtc") and parse_utc(episode["airDateUtc"]) > now
+        ),
+        key=lambda episode: episode["airDateUtc"],
+    )
+    return {
+        "title": series.get("title"),
+        "status": series.get("status"),
+        "network": series.get("network"),
+        "latest_season": max((season["seasonNumber"] for season in series.get("seasons", [])), default=None),
+        "last_aired": local_time(series.get("previousAiring")),
+        "next_airing": local_time(series.get("nextAiring")),
+        "upcoming_episodes": [episode_summary(episode) for episode in upcoming[:MAX_UPCOMING_EPISODES]],
+    }
+
+
+@mcp.tool()
+def upcoming(days: int = 14) -> dict:
+    """What is coming up in the next few days, from the Sonarr and Radarr calendars.
+
+    Sonarr lists monitored episodes airing in that window. Radarr lists
+    monitored movies with a cinema, digital, or physical release in it.
+    days is capped at 90. Times are local.
+    """
+    days = max(1, min(days, 90))
+    start = datetime.now(timezone.utc)
+    window = {"start": start.isoformat(), "end": (start + timedelta(days=days)).isoformat()}
+    result = {}
+    try:
+        episodes = api("SONARR", "GET", "calendar", params={**window, "includeSeries": "true"})
+        result["sonarr"] = [
+            {"show": (episode.get("series") or {}).get("title"), **episode_summary(episode)}
+            for episode in episodes
+        ]
+    except ArrError as error:
+        result["sonarr"] = f"unavailable: {error}"
+    try:
+        movies = api("RADARR", "GET", "calendar", params=window)
+        result["radarr"] = [
+            {
+                "title": movie.get("title"),
+                "year": movie.get("year"),
+                "downloaded": movie.get("hasFile"),
+                **release_dates(movie),
+            }
+            for movie in movies
+        ]
+    except ArrError as error:
+        result["radarr"] = f"unavailable: {error}"
+    return result
+
+
+@mcp.tool()
 def queue_status() -> dict:
     """Show what Sonarr and Radarr are currently downloading, one entry per download.
 
@@ -378,6 +449,36 @@ def percent_done(item: dict) -> float | None:
     if not size:
         return None
     return round(100 * (size - (item.get("sizeleft") or 0)) / size, 1)
+
+
+def parse_utc(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def local_time(value: str | None) -> str | None:
+    """Render a UTC timestamp from Sonarr in this machine's time zone."""
+    if not value:
+        return None
+    return parse_utc(value).astimezone().strftime("%a %d %b %Y %H:%M %Z")
+
+
+def episode_summary(episode: dict) -> dict:
+    return {
+        "season": episode.get("seasonNumber"),
+        "episode": episode.get("episodeNumber"),
+        "title": episode.get("title"),
+        "airs": local_time(episode.get("airDateUtc")),
+        "downloaded": episode.get("hasFile"),
+    }
+
+
+def release_dates(movie: dict) -> dict:
+    """Radarr release dates are calendar days, so keep only the date part."""
+    return {
+        "in_cinemas": (movie.get("inCinemas") or "")[:10] or None,
+        "digital_release": (movie.get("digitalRelease") or "")[:10] or None,
+        "physical_release": (movie.get("physicalRelease") or "")[:10] or None,
+    }
 
 
 if __name__ == "__main__":

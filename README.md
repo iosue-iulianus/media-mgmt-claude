@@ -15,6 +15,8 @@ can reach services on the LAN that a cloud session cannot.
 | `add_show(tvdb_id, seasons, category)` | Adds the series, monitoring all or the given seasons |
 | `monitor_seasons(tvdb_id, seasons)` | Switches on more seasons of a show already in Sonarr |
 | `queue_status()` | Current download queue for both services |
+| `show_schedule(tvdb_id)` | Last aired, next airing, and upcoming episodes of a show in Sonarr |
+| `upcoming(days)` | Sonarr and Radarr calendars for the next few days |
 | `replace_download(service, download_id)` | Cancels a dead download, blocklists the release, and searches again |
 
 It is add-only by design, with one exception: `replace_download` can cancel a
@@ -53,12 +55,14 @@ Requires [uv](https://docs.astral.sh/uv/) and Sonarr v4 / Radarr with API v3.
 ## Telegram bot (Docker)
 
 `bot/bot.py` is a Telegram front end that hands each message to the Claude
-Code CLI (`claude -p`) with only the media-mgmt tools available. Built-in
-tools (shell, files, web) and slash commands are disabled, and only the
+Code CLI (`claude -p`) with only the media-mgmt tools and WebSearch (for air
+and release dates the calendars don't have) available. Other built-in tools
+(shell, files, web fetch) and slash commands are disabled, and only the
 Telegram chats in `ALLOWED_TELEGRAM_CHATS` are answered. Each chat keeps
 one Claude session for follow-ups; `/new` starts a fresh one. In a group it
-only answers messages that @mention it or reply to it, and commands addressed
-as `/new@botname`, so it can share a group with other bots.
+only answers messages that @mention it, including follow-ups, and commands
+addressed as `/new@botname`, so it can share a group with other bots and
+people.
 
 It uses your Claude subscription through a long-lived token, so requests count
 against your plan's usage limits. Keep it to your own use: subscription

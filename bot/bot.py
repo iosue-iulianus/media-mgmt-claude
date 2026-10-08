@@ -1,9 +1,10 @@
 """Telegram front end for the media-mgmt MCP server.
 
 Each Telegram message is handed to the Claude Code CLI (claude -p) with only
-the media-mgmt tools available. Built-in tools (shell, files, web) and slash
-commands are disabled, so a message can only ever search, add, or check the
-queue. Each chat keeps one Claude session for follow-ups ("the 2024 one"),
+the media-mgmt tools and web search available. Other built-in tools (shell,
+files, web fetch) and slash commands are disabled, so a message can only ever
+search, add, check the queue and calendars, replace a dead download, or look
+something up on the web. Each chat keeps one Claude session for follow-ups ("the 2024 one"),
 which expires after a period of inactivity.
 
 Uses only the standard library. Configuration comes from environment
@@ -45,7 +46,12 @@ MEDIA_TOOLS = [
     "mcp__media-mgmt__monitor_seasons",
     "mcp__media-mgmt__queue_status",
     "mcp__media-mgmt__replace_download",
+    "mcp__media-mgmt__show_schedule",
+    "mcp__media-mgmt__upcoming",
 ]
+# The only built-in tool, for release and air-date questions the Sonarr and
+# Radarr calendars can't answer.
+BUILTIN_TOOLS = ["WebSearch"]
 
 HELP_TEXT = (
     "Ask in plain language, for example:\n"
@@ -59,8 +65,8 @@ HELP_TEXT = (
 sessions: dict[int, tuple[str, float]] = {}
 
 # Filled in from getMe at startup. In group chats the bot only answers
-# messages that @mention it or reply to it, and commands addressed to it.
-BOT_ID = 0
+# messages that @mention it and commands addressed to it. Replies to the bot
+# without a mention are ignored, so others in the group can't chat with it.
 BOT_USERNAME = ""
 
 
@@ -111,8 +117,8 @@ def claude_command(text: str, session_id: str | None) -> list[str]:
         "--model", CLAUDE_MODEL,
         "--mcp-config", str(APP_DIR / "mcp.json"),
         "--strict-mcp-config",
-        "--tools", "",
-        "--allowedTools", ",".join(MEDIA_TOOLS),
+        "--tools", ",".join(BUILTIN_TOOLS),
+        "--allowedTools", ",".join(MEDIA_TOOLS + BUILTIN_TOOLS),
         "--permission-mode", "dontAsk",
         "--permission-prompts", "none",
         "--disable-slash-commands",
@@ -153,10 +159,6 @@ def current_session(chat_id: int) -> str | None:
     return None
 
 
-def is_reply_to_bot(message: dict) -> bool:
-    return message.get("reply_to_message", {}).get("from", {}).get("id") == BOT_ID
-
-
 def handle_message(message: dict) -> None:
     chat_id = message["chat"]["id"]
     if chat_id not in ALLOWED_CHAT_IDS:
@@ -184,7 +186,7 @@ def handle_message(message: dict) -> None:
             send_message(chat_id, "Unknown command. " + HELP_TEXT)
         return
 
-    if not (private or mention.search(text) or is_reply_to_bot(message)):
+    if not (private or mention.search(text)):
         return
     if not text:
         send_message(chat_id, "Only text messages are supported for now.")
@@ -220,9 +222,8 @@ def poll_updates(offset: int | None) -> list[dict]:
 
 
 def main() -> None:
-    global BOT_ID, BOT_USERNAME
-    me = telegram("getMe", {})
-    BOT_ID, BOT_USERNAME = me["id"], me["username"]
+    global BOT_USERNAME
+    BOT_USERNAME = telegram("getMe", {})["username"]
     log(
         f"starting as @{BOT_USERNAME}, model={CLAUDE_MODEL}, "
         f"allowed chats={sorted(ALLOWED_CHAT_IDS)}"

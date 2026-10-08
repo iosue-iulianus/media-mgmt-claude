@@ -8,6 +8,8 @@ services:
       # Same .env the Mac uses: Sonarr/Radarr URLs, API keys, folders, profiles.
       - ./.env:/app/.env:ro
       - claude-state:/data
+      # Host time zone, so air times from the calendar tools are local.
+      - /etc/localtime:/etc/localtime:ro
     networks:
       macvlan:
         ipv4_address: 192.168.0.214
