@@ -21,9 +21,11 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-ALLOWED_USER_IDS = {
-    int(user_id) for user_id in os.environ["TELEGRAM_ALLOWED_USER_IDS"].split(",") if user_id.strip()
+ALLOWED_CHAT_IDS = {
+    int(chat_id) for chat_id in os.environ["ALLOWED_TELEGRAM_CHATS"].split(",") if chat_id.strip()
 }
+if not ALLOWED_CHAT_IDS:
+    raise SystemExit("ALLOWED_TELEGRAM_CHATS is empty; set at least one chat ID")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet")
 SESSION_IDLE_SECONDS = int(os.environ.get("SESSION_IDLE_MINUTES", "30")) * 60
 
@@ -145,9 +147,8 @@ def current_session(chat_id: int) -> str | None:
 
 def handle_message(message: dict) -> None:
     chat_id = message["chat"]["id"]
-    user_id = message.get("from", {}).get("id")
-    if user_id not in ALLOWED_USER_IDS:
-        log(f"ignored message from unauthorized user {user_id}")
+    if chat_id not in ALLOWED_CHAT_IDS:
+        log(f"ignored message from unauthorized chat {chat_id}")
         return
     if time.time() - message.get("date", 0) > IGNORE_MESSAGES_OLDER_THAN_SECONDS:
         log(f"ignored stale message {message.get('message_id')}")
@@ -196,7 +197,7 @@ def poll_updates(offset: int | None) -> list[dict]:
 
 
 def main() -> None:
-    log(f"starting, model={CLAUDE_MODEL}, allowed users={sorted(ALLOWED_USER_IDS)}")
+    log(f"starting, model={CLAUDE_MODEL}, allowed chats={sorted(ALLOWED_CHAT_IDS)}")
     offset = None
     while True:
         try:

@@ -51,7 +51,7 @@ Requires [uv](https://docs.astral.sh/uv/) and Sonarr v4 / Radarr with API v3.
 `bot/bot.py` is a Telegram front end that hands each message to the Claude
 Code CLI (`claude -p`) with only the media-mgmt tools available. Built-in
 tools (shell, files, web) and slash commands are disabled, and only the
-Telegram user IDs in `TELEGRAM_ALLOWED_USER_IDS` are answered. Each chat keeps
+Telegram chats in `ALLOWED_TELEGRAM_CHATS` are answered. Each chat keeps
 one Claude session for follow-ups; `/new` starts a fresh one.
 
 It uses your Claude subscription through a long-lived token, so requests count

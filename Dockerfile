@@ -20,6 +20,9 @@ RUN useradd --create-home --uid 1000 bot \
 WORKDIR /app
 COPY server.py /app/server.py
 COPY bot/ /app/
+# NAS shares can hand the build context over without world-read bits, which the
+# non-root bot user needs. (COPY --chmod would need BuildKit, which UGREEN lacks.)
+RUN chmod 0644 /app/*
 
 # Claude Code keeps its config and session history here (a named volume),
 # so conversations survive container restarts.
