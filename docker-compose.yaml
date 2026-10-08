@@ -10,8 +10,8 @@ services:
       - claude-state:/data
     networks:
       macvlan:
-        ipv4_address: 192.168.0.213
-        mac_address: 02:42:c0:a8:00:d5
+        ipv4_address: 192.168.0.214
+        mac_address: 02:42:c0:a8:00:d6
 
 volumes:
   claude-state:

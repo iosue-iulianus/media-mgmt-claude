@@ -12,6 +12,7 @@ variables, see bot.env.example.
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
@@ -54,6 +55,11 @@ HELP_TEXT = (
 
 # chat_id -> (claude session id, unix time of last use)
 sessions: dict[int, tuple[str, float]] = {}
+
+# Filled in from getMe at startup. In group chats the bot only answers
+# messages that @mention it or reply to it, and commands addressed to it.
+BOT_ID = 0
+BOT_USERNAME = ""
 
 
 def log(message: str) -> None:
@@ -145,6 +151,10 @@ def current_session(chat_id: int) -> str | None:
     return None
 
 
+def is_reply_to_bot(message: dict) -> bool:
+    return message.get("reply_to_message", {}).get("from", {}).get("id") == BOT_ID
+
+
 def handle_message(message: dict) -> None:
     chat_id = message["chat"]["id"]
     if chat_id not in ALLOWED_CHAT_IDS:
@@ -154,21 +164,32 @@ def handle_message(message: dict) -> None:
         log(f"ignored stale message {message.get('message_id')}")
         return
 
+    private = message["chat"]["type"] == "private"
     text = (message.get("text") or "").strip()
+    mention = re.compile(rf"@{re.escape(BOT_USERNAME)}\b", re.IGNORECASE)
+
+    if text.startswith("/"):
+        command, _, target = text.split()[0].lower().partition("@")
+        # In a group, bare commands and /cmd@otherbot belong to other bots.
+        if not private and target != BOT_USERNAME.lower():
+            return
+        if command in ("/start", "/help"):
+            send_message(chat_id, HELP_TEXT)
+        elif command == "/new":
+            sessions.pop(chat_id, None)
+            send_message(chat_id, "Started a fresh conversation.")
+        else:
+            send_message(chat_id, "Unknown command. " + HELP_TEXT)
+        return
+
+    if not (private or mention.search(text) or is_reply_to_bot(message)):
+        return
     if not text:
         send_message(chat_id, "Only text messages are supported for now.")
         return
-
-    command = text.split()[0].split("@")[0].lower()
-    if command in ("/start", "/help"):
+    text = mention.sub("", text).strip()
+    if not text:
         send_message(chat_id, HELP_TEXT)
-        return
-    if command == "/new":
-        sessions.pop(chat_id, None)
-        send_message(chat_id, "Started a fresh conversation.")
-        return
-    if text.startswith("/"):
-        send_message(chat_id, "Unknown command. " + HELP_TEXT)
         return
 
     stop_typing = threading.Event()
@@ -197,7 +218,13 @@ def poll_updates(offset: int | None) -> list[dict]:
 
 
 def main() -> None:
-    log(f"starting, model={CLAUDE_MODEL}, allowed chats={sorted(ALLOWED_CHAT_IDS)}")
+    global BOT_ID, BOT_USERNAME
+    me = telegram("getMe", {})
+    BOT_ID, BOT_USERNAME = me["id"], me["username"]
+    log(
+        f"starting as @{BOT_USERNAME}, model={CLAUDE_MODEL}, "
+        f"allowed chats={sorted(ALLOWED_CHAT_IDS)}"
+    )
     offset = None
     while True:
         try:

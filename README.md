@@ -52,7 +52,9 @@ Requires [uv](https://docs.astral.sh/uv/) and Sonarr v4 / Radarr with API v3.
 Code CLI (`claude -p`) with only the media-mgmt tools available. Built-in
 tools (shell, files, web) and slash commands are disabled, and only the
 Telegram chats in `ALLOWED_TELEGRAM_CHATS` are answered. Each chat keeps
-one Claude session for follow-ups; `/new` starts a fresh one.
+one Claude session for follow-ups; `/new` starts a fresh one. In a group it
+only answers messages that @mention it or reply to it, and commands addressed
+as `/new@botname`, so it can share a group with other bots.
 
 It uses your Claude subscription through a long-lived token, so requests count
 against your plan's usage limits. Keep it to your own use: subscription
@@ -61,7 +63,7 @@ credentials can't be used on other people's behalf.
 1. Create a bot with @BotFather and note its token.
 2. On any machine signed in to Claude Code, run `claude setup-token` and copy
    the token it prints (valid for one year).
-3. On the Docker host, next to `docker-compose.yml`:
+3. On the Docker host, next to `docker-compose.yaml`:
    - `cp bot.env.example bot.env` and fill it in
    - put the same `.env` the MCP server uses alongside it
 4. `docker compose up -d --build`, then `docker compose logs -f`.
