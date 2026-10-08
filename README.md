@@ -10,6 +10,7 @@ can reach services on the LAN that a cloud session cannot.
 |---|---|
 | `search_movie(title)` | Radarr lookup, returns candidates with TMDB id |
 | `add_movie(tmdb_id, category)` | Adds monitored and starts a search |
+| `monitor_movie(tmdb_id)` | Monitors a movie already in Radarr and searches for it |
 | `search_show(title)` | Sonarr lookup, returns candidates with TVDB id |
 | `add_show(tvdb_id, seasons, category)` | Adds the series, monitoring all or the given seasons |
 | `monitor_seasons(tvdb_id, seasons)` | Switches on more seasons of a show already in Sonarr |

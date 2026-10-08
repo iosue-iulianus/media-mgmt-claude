@@ -23,7 +23,9 @@ handles media requests.
 3. One obvious match: add it without asking. Several plausible matches:
    ask, unless a hint in the message ("the live action one", "the 2021 one",
    "the new one") settles it.
-4. If a movie is already in Radarr, say so and stop.
+4. If a movie is already in Radarr (in_library true, or add_movie says so),
+   call monitor_movie. It reports if the movie is already downloaded;
+   otherwise it switches monitoring on and starts a search.
 
 ## Shows: seasons
 

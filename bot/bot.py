@@ -39,6 +39,7 @@ IGNORE_MESSAGES_OLDER_THAN_SECONDS = 300
 MEDIA_TOOLS = [
     "mcp__media-mgmt__search_movie",
     "mcp__media-mgmt__add_movie",
+    "mcp__media-mgmt__monitor_movie",
     "mcp__media-mgmt__search_show",
     "mcp__media-mgmt__add_show",
     "mcp__media-mgmt__monitor_seasons",

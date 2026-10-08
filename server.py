@@ -6,8 +6,8 @@
 
 Runs as a stdio child process of the Claude desktop app. It reads connection
 details from the .env file next to this script, so API keys never leave this
-machine. It can search, add, switch on monitoring for more seasons of a show,
-and report the download queue. It cannot delete, unmonitor, change settings, or
+machine. It can search, add, switch on monitoring for a movie or for more
+seasons of a show, and report the download queue. It cannot delete, unmonitor, change settings, or
 reach any host other than the two configured in .env.
 
 Run manually for a smoke test:  uv run server.py
@@ -150,7 +150,7 @@ def add_movie(tmdb_id: int, category: Literal["movie", "anime", "standup"] = "mo
     movie = api("RADARR", "GET", "movie/lookup/tmdb", params={"tmdbId": tmdb_id})
     label = f"{movie.get('title')} ({movie.get('year')})"
     if movie.get("id"):
-        return f"{label} is already in Radarr."
+        return f"{label} is already in Radarr. Use monitor_movie to monitor and search for it."
 
     folder = root_folder("RADARR", category)
     movie.update(
@@ -163,6 +163,29 @@ def add_movie(tmdb_id: int, category: Literal["movie", "anime", "standup"] = "mo
     )
     api("RADARR", "POST", "movie", body=movie)
     return f"Added {label} to Radarr in {folder} and started a search."
+
+
+@mcp.tool()
+def monitor_movie(tmdb_id: int) -> str:
+    """Monitor a movie already in Radarr and search for it.
+
+    Use this when add_movie reports the movie is already in Radarr but it was
+    never downloaded, for example because it was added unmonitored. It only
+    switches monitoring on. It never unmonitors or deletes anything.
+    """
+    matches = api("RADARR", "GET", "movie", params={"tmdbId": tmdb_id})
+    if not matches:
+        raise ArrError(f"No movie with TMDB id {tmdb_id} is in Radarr. Use add_movie first.")
+    movie = matches[0]
+    label = f"{movie.get('title')} ({movie.get('year')})"
+    if movie.get("hasFile"):
+        return f"{label} is already downloaded."
+
+    if not movie.get("monitored"):
+        movie["monitored"] = True
+        api("RADARR", "PUT", f"movie/{movie['id']}", body=movie)
+    api("RADARR", "POST", "command", body={"name": "MoviesSearch", "movieIds": [movie["id"]]})
+    return f"Now monitoring {label} and started a search."
 
 
 @mcp.tool()
