@@ -126,10 +126,16 @@ def search_movie(title: str) -> list[dict]:
 
     Call this before add_movie. If more than one plausible match comes back
     (remakes, same title in different years), ask the user which one they mean.
+    in_library only means Radarr tracks the movie; downloaded says whether
+    the file is actually there.
     """
     results = api("RADARR", "GET", "movie/lookup", params={"term": title})
-    return [
-        {
+    results = rank_results(
+        results, title, lambda movie: (movie.get("ratings") or {}).get("tmdb", {}).get("votes")
+    )
+    candidates = []
+    for movie in results[:MAX_SEARCH_RESULTS]:
+        candidate = {
             "title": movie.get("title"),
             "year": movie.get("year"),
             "tmdb_id": movie.get("tmdbId"),
@@ -140,13 +146,21 @@ def search_movie(title: str) -> list[dict]:
             **release_dates(movie),
             "overview": (movie.get("overview") or "")[:200],
         }
-        for movie in results[:MAX_SEARCH_RESULTS]
-    ]
+        library = library_movie(movie["tmdbId"]) if movie.get("id") else None
+        if library:
+            candidate["monitored"] = library.get("monitored")
+            candidate["downloaded"] = bool(library.get("hasFile"))
+        candidates.append(candidate)
+    return candidates
 
 
 @mcp.tool()
 def add_movie(tmdb_id: int, category: Literal["movie", "anime", "standup"] = "movie") -> str:
-    """Add a movie to Radarr by TMDB id, monitored, and start a search for it.
+    """Get a movie: add it to Radarr by TMDB id, monitored, and start a search.
+
+    If the movie is already in Radarr but not downloaded, this switches
+    monitoring on and searches for it instead. If it is already downloaded,
+    it says so and changes nothing.
 
     category picks the library folder: "anime" for Japanese animated films,
     "standup" for stand-up comedy specials, "movie" for everything else. Use
@@ -156,7 +170,7 @@ def add_movie(tmdb_id: int, category: Literal["movie", "anime", "standup"] = "mo
     movie = api("RADARR", "GET", "movie/lookup/tmdb", params={"tmdbId": tmdb_id})
     label = f"{movie.get('title')} ({movie.get('year')})"
     if movie.get("id"):
-        return f"{label} is already in Radarr. Use monitor_movie to monitor and search for it."
+        return monitor_existing_movie(tmdb_id)
 
     folder = root_folder("RADARR", category)
     movie.update(
@@ -171,18 +185,34 @@ def add_movie(tmdb_id: int, category: Literal["movie", "anime", "standup"] = "mo
     return f"Added {label} to Radarr in {folder} and started a search."
 
 
-@mcp.tool()
-def monitor_movie(tmdb_id: int) -> str:
-    """Monitor a movie already in Radarr and search for it.
+def rank_results(results: list[dict], term: str, votes) -> list[dict]:
+    """Order lookup results before they are cut to MAX_SEARCH_RESULTS.
 
-    Use this when add_movie reports the movie is already in Radarr but it was
-    never downloaded, for example because it was added unmonitored. It only
-    switches monitoring on. It never unmonitors or deletes anything.
+    Library titles first, then exact title matches, then by vote count, so a
+    well-known version isn't cut off behind obscure ones ("The Office" lists
+    eight international remakes before the US one). Ties keep the service's
+    own relevance order.
     """
-    matches = api("RADARR", "GET", "movie", params={"tmdbId": tmdb_id})
-    if not matches:
-        raise ArrError(f"No movie with TMDB id {tmdb_id} is in Radarr. Use add_movie first.")
-    movie = matches[0]
+    wanted = normalize_title(term)
+    return sorted(
+        results,
+        key=lambda item: (
+            not item.get("id"),
+            normalize_title(item.get("title") or "") != wanted,
+            -(votes(item) or 0),
+        ),
+    )
+
+
+def normalize_title(title: str) -> str:
+    return "".join(character for character in title.lower() if character.isalnum())
+
+
+def monitor_existing_movie(tmdb_id: int) -> str:
+    """Switch monitoring on for a movie already in Radarr and search for it."""
+    movie = library_movie(tmdb_id)
+    if not movie:
+        raise ArrError(f"No movie with TMDB id {tmdb_id} is in Radarr.")
     label = f"{movie.get('title')} ({movie.get('year')})"
     if movie.get("hasFile"):
         return f"{label} is already downloaded."
@@ -191,7 +221,15 @@ def monitor_movie(tmdb_id: int) -> str:
         movie["monitored"] = True
         api("RADARR", "PUT", f"movie/{movie['id']}", body=movie)
     api("RADARR", "POST", "command", body={"name": "MoviesSearch", "movieIds": [movie["id"]]})
-    return f"Now monitoring {label} and started a search."
+    return (
+        f"{label} was already in Radarr but not downloaded. "
+        f"Now monitoring it and started a search."
+    )
+
+
+def library_movie(tmdb_id: int) -> dict | None:
+    matches = api("RADARR", "GET", "movie", params={"tmdbId": tmdb_id})
+    return matches[0] if matches else None
 
 
 @mcp.tool()
@@ -199,11 +237,17 @@ def search_show(title: str) -> list[dict]:
     """Search Sonarr for TV series matching a title. Returns candidates with tvdb_id.
 
     Call this before add_show. If more than one plausible match comes back,
-    ask the user which one they mean.
+    ask the user which one they mean. in_library only means Sonarr tracks the
+    show. For shows in the library, library has the next and last air dates
+    (local time) and, per season, whether it is monitored and how many
+    episodes are downloaded out of the total listed (which can include
+    episodes that haven't aired yet).
     """
     results = api("SONARR", "GET", "series/lookup", params={"term": title})
-    return [
-        {
+    results = rank_results(results, title, lambda series: (series.get("ratings") or {}).get("votes"))
+    candidates = []
+    for series in results[:MAX_SEARCH_RESULTS]:
+        candidate = {
             "title": series.get("title"),
             "year": series.get("year"),
             "tvdb_id": series.get("tvdbId"),
@@ -211,12 +255,19 @@ def search_show(title: str) -> list[dict]:
             "status": series.get("status"),
             "genres": series.get("genres"),
             "original_language": (series.get("originalLanguage") or {}).get("name"),
-            "season_count": series.get("statistics", {}).get("seasonCount"),
+            "season_numbers": sorted(
+                season["seasonNumber"]
+                for season in series.get("seasons", [])
+                if season["seasonNumber"] > 0
+            ),
             "in_library": bool(series.get("id")),
             "overview": (series.get("overview") or "")[:200],
         }
-        for series in results[:MAX_SEARCH_RESULTS]
-    ]
+        library = library_series(series["tvdbId"]) if series.get("id") else None
+        if library:
+            candidate["library"] = series_status(library)
+        candidates.append(candidate)
+    return candidates
 
 
 @mcp.tool()
@@ -225,11 +276,15 @@ def add_show(
     seasons: list[int] | None = None,
     category: Literal["tv", "anime"] = "tv",
 ) -> str:
-    """Add a TV series to Sonarr by TVDB id and start a search for missing episodes.
+    """Get a show: add it to Sonarr by TVDB id and search for the chosen seasons.
 
     seasons: season numbers to monitor, for example [1] or [2, 3]. Leave empty
     to monitor every season (specials excluded). Upcoming shows are added and
     episodes are grabbed as they air.
+
+    If the show is already in Sonarr, this switches the given seasons on and
+    searches for them instead. With no seasons it only reports what is
+    monitored and downloaded, so the user can be asked which seasons they want.
 
     category picks the library folder: "anime" for Japanese animated series
     (also sets Sonarr's anime series type), "tv" for everything else. Use the
@@ -242,7 +297,13 @@ def add_show(
     series = results[0]
     label = f"{series.get('title')} ({series.get('year')})"
     if series.get("id"):
-        return f"{label} is already in Sonarr. Use monitor_seasons to get more seasons of it."
+        if seasons:
+            return monitor_existing_seasons(tvdb_id, seasons)
+        status = series_status(library_series(tvdb_id) or {})
+        return (
+            f"{label} is already in Sonarr. Nothing changed. Ask which seasons to get, "
+            f"then call add_show again with them. Current state: {json.dumps(status)}"
+        )
 
     for season in series.get("seasons", []):
         number = season["seasonNumber"]
@@ -265,18 +326,11 @@ def add_show(
     return f"Added {label} to Sonarr in {folder}, monitoring {scope}, and started a search."
 
 
-@mcp.tool()
-def monitor_seasons(tvdb_id: int, seasons: list[int]) -> str:
-    """Start monitoring more seasons of a series already in Sonarr and search for them.
-
-    Use this when add_show reports the series is already in the library, for
-    example "get season 2" after season 1 was added earlier. It only switches
-    seasons on. It never unmonitors or deletes anything.
-    """
-    matches = api("SONARR", "GET", "series", params={"tvdbId": tvdb_id})
-    if not matches:
-        raise ArrError(f"No series with TVDB id {tvdb_id} is in Sonarr. Use add_show first.")
-    series = matches[0]
+def monitor_existing_seasons(tvdb_id: int, seasons: list[int]) -> str:
+    """Switch seasons on for a series already in Sonarr and search for them."""
+    series = library_series(tvdb_id)
+    if not series:
+        raise ArrError(f"No series with TVDB id {tvdb_id} is in Sonarr.")
     label = f"{series.get('title')} ({series.get('year')})"
 
     available = {season["seasonNumber"] for season in series.get("seasons", [])}
@@ -293,7 +347,39 @@ def monitor_seasons(tvdb_id: int, seasons: list[int]) -> str:
     for number in sorted(set(seasons)):
         command = {"name": "SeasonSearch", "seriesId": series["id"], "seasonNumber": number}
         api("SONARR", "POST", "command", body=command)
-    return f"Now monitoring seasons {sorted(set(seasons))} of {label} and started a search."
+    return (
+        f"{label} was already in Sonarr. Now monitoring seasons {sorted(set(seasons))} "
+        f"and started a search."
+    )
+
+
+def library_series(tvdb_id: int) -> dict | None:
+    matches = api("SONARR", "GET", "series", params={"tvdbId": tvdb_id})
+    return matches[0] if matches else None
+
+
+def series_status(series: dict) -> dict:
+    """What the library has for a series: air dates and per-season episode counts."""
+    seasons = []
+    for season in series.get("seasons", []):
+        stats = season.get("statistics") or {}
+        if season["seasonNumber"] == 0 or not stats.get("totalEpisodeCount"):
+            continue  # skip specials and seasons with no episodes listed yet
+        seasons.append(
+            {
+                "season": season["seasonNumber"],
+                "monitored": season.get("monitored"),
+                # Sonarr's episodeCount only counts monitored episodes, so it
+                # reads 0 for unmonitored seasons that did air. Leave it out.
+                "episodes_downloaded": stats.get("episodeFileCount", 0),
+                "episodes_total": stats.get("totalEpisodeCount", 0),
+            }
+        )
+    return {
+        "last_aired": local_time(series.get("previousAiring")),
+        "next_airing": local_time(series.get("nextAiring")),
+        "seasons": seasons,
+    }
 
 
 @mcp.tool()

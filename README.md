@@ -8,12 +8,10 @@ can reach services on the LAN that a cloud session cannot.
 
 | Tool | Does |
 |---|---|
-| `search_movie(title)` | Radarr lookup, returns candidates with TMDB id |
-| `add_movie(tmdb_id, category)` | Adds monitored and starts a search |
-| `monitor_movie(tmdb_id)` | Monitors a movie already in Radarr and searches for it |
-| `search_show(title)` | Sonarr lookup, returns candidates with TVDB id |
-| `add_show(tvdb_id, seasons, category)` | Adds the series, monitoring all or the given seasons |
-| `monitor_seasons(tvdb_id, seasons)` | Switches on more seasons of a show already in Sonarr |
+| `search_movie(title)` | Radarr lookup with TMDB id, release dates, and whether it's downloaded |
+| `add_movie(tmdb_id, category)` | Adds monitored and searches; for a movie already in Radarr, monitors and searches |
+| `search_show(title)` | Sonarr lookup with TVDB id; library shows include air dates and per-season episode counts |
+| `add_show(tvdb_id, seasons, category)` | Adds the series with all or the given seasons; for a show already in Sonarr, switches those seasons on |
 | `queue_status()` | Current download queue for both services |
 | `show_schedule(tvdb_id)` | Last aired, next airing, and upcoming episodes of a show in Sonarr |
 | `upcoming(days)` | Sonarr and Radarr calendars for the next few days |
@@ -58,11 +56,20 @@ Requires [uv](https://docs.astral.sh/uv/) and Sonarr v4 / Radarr with API v3.
 Code CLI (`claude -p`) with only the media-mgmt tools and WebSearch (for air
 and release dates the calendars don't have) available. Other built-in tools
 (shell, files, web fetch) and slash commands are disabled, and only the
-Telegram chats in `ALLOWED_TELEGRAM_CHATS` are answered. Each chat keeps
-one Claude session for follow-ups; `/new` starts a fresh one. In a group it
-only answers messages that @mention it, including follow-ups, and commands
-addressed as `/new@botname`, so it can share a group with other bots and
-people.
+Telegram chats in `ALLOWED_TELEGRAM_CHATS` are answered. Each person in each
+chat keeps their own Claude session for follow-ups; `/new` starts a fresh
+one. In a group it only answers messages that @mention it, including
+follow-ups, and commands addressed as `/new@botname`, so it can share a group
+with other bots and people.
+
+Replies are sent as replies to the message that asked. When there is a
+choice to make (which match, which download) the options come as buttons.
+Asking for a multi-season show without naming seasons brings up a season
+picker: toggle seasons on and off (the first is preselected), then tap Get.
+Only the person who asked can pick. Conversations run in
+parallel, at most three Claude runs at a time. Each run logs one `run` line
+with its turns, time, cost, tokens, and the tools it called; errors go to the
+log and the chat just gets a short "something went wrong".
 
 It uses your Claude subscription through a long-lived token, so requests count
 against your plan's usage limits. Keep it to your own use: subscription
