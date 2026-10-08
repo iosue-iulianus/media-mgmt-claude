@@ -44,6 +44,7 @@ MEDIA_TOOLS = [
     "mcp__media-mgmt__add_show",
     "mcp__media-mgmt__monitor_seasons",
     "mcp__media-mgmt__queue_status",
+    "mcp__media-mgmt__replace_download",
 ]
 
 HELP_TEXT = (

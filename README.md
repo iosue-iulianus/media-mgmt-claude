@@ -15,9 +15,12 @@ can reach services on the LAN that a cloud session cannot.
 | `add_show(tvdb_id, seasons, category)` | Adds the series, monitoring all or the given seasons |
 | `monitor_seasons(tvdb_id, seasons)` | Switches on more seasons of a show already in Sonarr |
 | `queue_status()` | Current download queue for both services |
+| `replace_download(service, download_id)` | Cancels a dead download, blocklists the release, and searches again |
 
-It is add-only by design: no delete, no unmonitor, no settings changes, and no
-hosts other than the two in `.env`.
+It is add-only by design, with one exception: `replace_download` can cancel a
+download in the queue so a different release gets grabbed. It cannot delete
+movies, shows, or files, unmonitor, change settings, or reach hosts other than
+the two in `.env`.
 
 Categories map to root folders via `.env`: `movie`, `anime`, `standup` for
 Radarr, and `tv`, `anime` for Sonarr (which also sets the anime series type).

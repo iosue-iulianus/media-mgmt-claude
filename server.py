@@ -7,8 +7,10 @@
 Runs as a stdio child process of the Claude desktop app. It reads connection
 details from the .env file next to this script, so API keys never leave this
 machine. It can search, add, switch on monitoring for a movie or for more
-seasons of a show, and report the download queue. It cannot delete, unmonitor, change settings, or
-reach any host other than the two configured in .env.
+seasons of a show, report the download queue, and replace a dead download
+(cancel it, blocklist the release, search again). It cannot delete library
+items or files, unmonitor, change settings, or reach any host other than the
+two configured in .env.
 
 Run manually for a smoke test:  uv run server.py
 """
@@ -65,7 +67,8 @@ def api(service: str, method: str, path: str, params: dict | None = None, body: 
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
-            return json.load(response)
+            raw = response.read()
+            return json.loads(raw) if raw else None  # DELETE replies have no body
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")[:500]
         raise ArrError(f"{service} returned HTTP {error.code}: {detail}") from error
@@ -295,7 +298,8 @@ def queue_status() -> dict:
     """Show what Sonarr and Radarr are currently downloading, one entry per download.
 
     For Sonarr, episode_count is how many episodes that download covers (a
-    season pack is a single download with many episodes).
+    season pack is a single download with many episodes). download_id is what
+    replace_download takes.
     """
     status = {}
     for service in ("SONARR", "RADARR"):
@@ -310,6 +314,41 @@ def queue_status() -> dict:
     return status
 
 
+@mcp.tool()
+def replace_download(service: Literal["sonarr", "radarr"], download_id: str) -> str:
+    """Cancel one stuck or bad download, blocklist that release, and search for another.
+
+    Use this only when the user says a specific download is dead, stalled, or
+    the wrong release, and asks to replace or cancel it. Get download_id from
+    queue_status. The release is removed from the download client along with
+    its partial data, and blocklisted so it is not grabbed again. The movie or
+    episodes stay monitored, so Radarr or Sonarr searches for a different
+    release straight away. Library files are never touched.
+    """
+    name = service.upper()
+    records = api(name, "GET", "queue", params={"pageSize": QUEUE_PAGE_SIZE}).get("records", [])
+    matching = [item for item in records if download_key(item) == download_id]
+    if not matching:
+        raise ArrError(f"No download {download_id} in the {service} queue. Check queue_status.")
+
+    api(
+        name,
+        "DELETE",
+        "queue/bulk",
+        params={"removeFromClient": "true", "blocklist": "true", "skipRedownload": "false"},
+        body={"ids": [item["id"] for item in matching]},
+    )
+    return (
+        f"Removed {matching[0].get('title')} from the download client, blocklisted it, "
+        f"and started a search for a different release."
+    )
+
+
+def download_key(item: dict) -> str:
+    """Identify the download a queue row belongs to (season packs share one)."""
+    return item.get("downloadId") or item.get("title")
+
+
 def group_by_download(records: list[dict], count_episodes: bool) -> list[dict]:
     """Collapse queue rows that belong to the same download into one entry.
 
@@ -318,9 +357,10 @@ def group_by_download(records: list[dict], count_episodes: bool) -> list[dict]:
     """
     downloads = {}
     for item in records:
-        key = item.get("downloadId") or item.get("title")
+        key = download_key(item)
         if key not in downloads:
             downloads[key] = {
+                "download_id": key,
                 "title": item.get("title"),
                 "status": item.get("status"),
                 "percent_done": percent_done(item),
