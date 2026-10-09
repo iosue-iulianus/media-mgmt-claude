@@ -4,3 +4,4 @@ bot.env
 __pycache__/
 .venv/
 .DS_Store
+docker-compose.override.yaml

@@ -30,11 +30,10 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+# Empty answers nobody, but still logs the ID of each chat that messages the bot.
 ALLOWED_CHAT_IDS = {
-    int(chat_id) for chat_id in os.environ["ALLOWED_TELEGRAM_CHATS"].split(",") if chat_id.strip()
+    int(chat_id) for chat_id in os.environ.get("ALLOWED_TELEGRAM_CHATS", "").split(",") if chat_id.strip()
 }
-if not ALLOWED_CHAT_IDS:
-    raise SystemExit("ALLOWED_TELEGRAM_CHATS is empty; set at least one chat ID")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet")
 SESSION_IDLE_SECONDS = int(os.environ.get("SESSION_IDLE_MINUTES", "30")) * 60
 
@@ -511,6 +510,8 @@ def main() -> None:
         f"starting as @{BOT_USERNAME}, model={CLAUDE_MODEL}, "
         f"allowed chats={sorted(ALLOWED_CHAT_IDS)}"
     )
+    if not ALLOWED_CHAT_IDS:
+        log("ALLOWED_TELEGRAM_CHATS is empty: answering nobody. Message the bot and copy the chat ID below.")
     offset = None
     while True:
         try:
